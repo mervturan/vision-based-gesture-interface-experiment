@@ -8,7 +8,7 @@ RECTANGLE_SIZE = 200
 rectangle_color = COLOR_PINK
 rectangle_x, rectangle_y = 100, 100
 
-webcam_capture = cv2.VideoCapture(1)
+webcam_capture = cv2.VideoCapture(0)
 webcam_capture.set(3, 1280)
 webcam_capture.set(4, 720)
 
