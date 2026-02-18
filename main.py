@@ -1,49 +1,40 @@
-import cv2
-from HandDetector import HandDetector
-
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
+import cv2
+from HandDetector import HandDetector
 
-COLOR_PINK = (255, 0, 255)
+# ----------------------------
+# Config / Constants
+# ----------------------------
 COLOR_GREEN = (0, 255, 0)
 RECTANGLE_SIZE = 200
 
-rectangle_color = COLOR_PINK
-rectangle_x, rectangle_y = 100, 100
-db_img = cv2.imread("db_icon.png", cv2.IMREAD_UNCHANGED) # Load the database icon image
-
-# Set the initial position size of the dataabse image
-db_w, db_h = 120, 120
+# Draggable PNG
+DB_IMG_PATH = "db_icon.png"
+DB_W, DB_H = 120, 120
 db_x, db_y = 100, 100
-db_img = cv2.resize(db_img, (db_w, db_h))
 
+# Drop zone
+DROP_X, DROP_Y = 800, 200
+DROP_W, DROP_H = 200, 200
 
-webcam_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-webcam_capture.set(3, 1280)
-webcam_capture.set(4, 720)
+# State
+is_dragging = False
 
-hand_detector = HandDetector()
-
-
-def is_indicator_in_rectangle():
-    return rectangle_x < indicator_landmark[1] < rectangle_x + RECTANGLE_SIZE and rectangle_y < indicator_landmark[2] < rectangle_y + RECTANGLE_SIZE
-
-
-# Function to overlay an image with transparency onto the background
+# ----------------------------
+# Helpers
+# ----------------------------
 def overlay_image(bg, img, x, y):
+    """Alpha-blend a BGRA/BGR image onto bg at (x,y), clipped to bounds."""
     h, w = img.shape[:2]
     H, W = bg.shape[:2]
 
-    # Clip overlay region to background bounds
     x1, y1 = max(0, x), max(0, y)
     x2, y2 = min(W, x + w), min(H, y + h)
-
-    # If completely outside, do nothing
     if x1 >= x2 or y1 >= y2:
         return
 
-    # Corresponding region in the overlay image
     ox1, oy1 = x1 - x, y1 - y
     ox2, oy2 = ox1 + (x2 - x1), oy1 + (y2 - y1)
 
@@ -57,44 +48,71 @@ def overlay_image(bg, img, x, y):
         bg[y1:y2, x1:x2] = overlay
 
 
+def is_inside_drop_zone(x, y, w, h):
+    center_x = x + w // 2
+    center_y = y + h // 2
+    return (DROP_X < center_x < DROP_X + DROP_W) and (DROP_Y < center_y < DROP_Y + DROP_H)
+
+# ----------------------------
+# Setup
+# ----------------------------
+db_img = cv2.imread(DB_IMG_PATH, cv2.IMREAD_UNCHANGED)
+db_img = cv2.resize(db_img, (DB_W, DB_H))
+
+webcam_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+# If these cause issues on some laptops, comment them out
+webcam_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+webcam_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+hand_detector = HandDetector()
+
+# ----------------------------
+# Main loop
+# ----------------------------
 while True:
     success, img = webcam_capture.read()
-
-    # Avoid crashing frame if webcam fails to capture
     if not success or img is None:
-     continue
+        continue
 
     img = cv2.flip(img, 1)
 
     img = hand_detector.process_hands(img)
     landmark_list = hand_detector.get_positions(img)
 
-    # Draw Image Each Frame
-    overlay_image(img, db_img, db_x, db_y)
+    cursor_x, cursor_y = None, None
+    pinching = False
 
-    # Updated if block to work weith png
     if landmark_list:
+        # index fingertip
         indicator_landmark = landmark_list[8]
         cursor_x, cursor_y = indicator_landmark[1], indicator_landmark[2]
 
-        # Optional: keep rectangle logic as a target zone, not the draggable object
-        if is_indicator_in_rectangle():
-            rectangle_color = COLOR_GREEN
+        pinching = hand_detector.is_click(landmark_list)
+
+    # -------- Drag + Drop logic (single source of truth) --------
+    if cursor_x is not None and cursor_y is not None:
+        if pinching:
+            is_dragging = True
+            db_x = cursor_x - DB_W // 2
+            db_y = cursor_y - DB_H // 2
         else:
-            rectangle_color = COLOR_PINK
+            if is_dragging:
+                # released
+                if is_inside_drop_zone(db_x, db_y, DB_W, DB_H):
+                    db_x = DROP_X + DROP_W // 2 - DB_W // 2
+                    db_y = DROP_Y + DROP_H // 2 - DB_H // 2
+                is_dragging = False
 
-        # Only move DB icon when pinching (click gesture)
-        if hand_detector.is_click(landmark_list):
-            db_x = cursor_x - db_w // 2
-            db_y = cursor_y - db_h // 2
+    # -------- Draw UI --------
+    # Draggable image
+    overlay_image(img, db_img, db_x, db_y)
 
-        
-    cv2.rectangle(img, (rectangle_x, rectangle_y), (rectangle_x + RECTANGLE_SIZE, rectangle_y + RECTANGLE_SIZE), rectangle_color, cv2.FILLED)
+    # Drop zone
+    cv2.rectangle(img, (DROP_X, DROP_Y), (DROP_X + DROP_W, DROP_Y + DROP_H), COLOR_GREEN, 3)
 
     cv2.imshow("Drag and Drop OpenCV", img)
-    if (cv2.waitKey(1) & 0xFF) == ord('q'):
+    if (cv2.waitKey(1) & 0xFF) == ord("q"):
         break
-    
+
 webcam_capture.release()
 cv2.destroyAllWindows()
-
